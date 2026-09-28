@@ -25,11 +25,16 @@ panoramic_spatialstats(
 
 \item{radii_um}{Numeric vector of radii (microns).}
 
-\item{stat}{Summary statistic. Default is \code{"local_comp_enrichment"}. Other supported values are \code{"Lcross"}, \code{"Kcross"}, \code{"Lest"}, and \code{"Kest"}.}
+\item{stat}{Summary statistic. The default \code{"local_comp_enrichment"}
+uses an edge-corrected CSR null. \code{"local_comp_global_enrichment"} is
+an opt-in global-composition (random-label) alternative conditional on the
+observed cell locations. Other supported values are \code{"Lcross"},
+\code{"Kcross"}, \code{"Lest"}, and \code{"Kest"}.}
 
 \item{nsim}{Integer number of Loh bootstrap replicates per sample/pair.}
 
-\item{correction}{Edge correction method passed to spatstat summaries.}
+\item{correction}{Edge correction method passed to spatstat summaries. It is
+ignored for local-composition statistics.}
 
 \item{seed}{Optional seed for reproducible bootstrap sampling.}
 
@@ -37,7 +42,8 @@ panoramic_spatialstats(
 
 \item{tile_size}{Optional tile size for block bootstrap in coordinate units.}
 
-\item{nx, ny}{Optional tile counts for block bootstrap when \code{boot = "block"}.}
+\item{nx, ny}{Optional tile counts for block bootstrap when \code{boot = "block"}.
+When neither is supplied, a 4-by-4 grid is used.}
 
 \item{BPPARAM}{BiocParallel backend used across samples.}
 
@@ -60,9 +66,20 @@ for all requested cell-type pairs and radii.
 For L-function statistics, PANORAMIC computes variances via the delta method
 from corresponding K-function bootstrap estimates and centers by \code{r}.
 
-For \code{stat = "local_comp_enrichment"}, PANORAMIC reports edge-corrected
-observed-minus-expected local target composition (percentage points) and uses
-Loh bootstrap for uncertainty.
+For \code{stat = "local_comp_enrichment"}, PANORAMIC reports the
+edge-corrected observed-minus-expected local target composition in percentage
+points. The expected proportion is the expected target count in the overlap
+area of the radius disc and the tissue window, divided by the observed local
+neighbor count. For self-pairs, the anchor is excluded from the expected target
+density.
+
+\code{stat = "local_comp_global_enrichment"} instead subtracts the
+sample-wide target proportion (excluding the anchor for self-pairs). It is a
+random-label null conditional on the observed cell locations, and can be useful
+when the question concerns label mixing within an observed tissue architecture.
+It does not by itself adjust for spatially varying abundance or establish a
+direct cell-cell interaction. Both local-composition statistics use a spatial
+bootstrap for uncertainty.
 }
 \examples{
 toy <- panoramic_simulate_dataset(seed = 1)

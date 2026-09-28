@@ -131,6 +131,15 @@ panoramic_meta_mv <- function(
   vi <- SummarizedExperiment::assay(se, "vi")
   cd <- S4Vectors::as.data.frame(SummarizedExperiment::colData(se))
 
+  if (!is.character(patient_col) || length(patient_col) != 1L ||
+      is.na(patient_col) || !nzchar(patient_col)) {
+    stop("`patient_col` must be a non-missing column name.", call. = FALSE)
+  }
+  if (!is.null(group_col) &&
+      (!is.character(group_col) || length(group_col) != 1L ||
+       is.na(group_col) || !nzchar(group_col))) {
+    stop("`group_col` must be NULL or a non-missing column name.", call. = FALSE)
+  }
   if (!patient_col %in% colnames(cd)) {
     stop("`patient_col` not found in colData(se).")
   }
@@ -148,6 +157,19 @@ panoramic_meta_mv <- function(
 
   patient_id <- as.character(cd[[patient_col]])
   group_id <- if (is.null(group_col)) NULL else as.character(cd[[group_col]])
+  validate_id <- function(x, name, unique_required = FALSE) {
+    if (length(x) != ncol(yi) || anyNA(x) || any(!nzchar(x))) {
+      stop(sprintf("`%s` must be non-missing and non-empty for every sample.", name),
+           call. = FALSE)
+    }
+    if (unique_required && anyDuplicated(x)) {
+      stop(sprintf("`%s` must uniquely identify each sample.", name),
+           call. = FALSE)
+    }
+  }
+  validate_id(patient_id, "patient_col")
+  validate_id(sample_id, "sample_col", unique_required = TRUE)
+  if (!is.null(group_id)) validate_id(group_id, "group_col")
   all_groups <- if (is.null(group_id)) {
     NULL
   } else {
@@ -335,10 +357,18 @@ panoramic_meta_mv <- function(
       if (!is.na(idx1) && !is.na(idx2)) {
         vb <- fit$vb
         var_diff <- vb[idx1, idx1] + vb[idx2, idx2] - 2 * vb[idx1, idx2]
-        se_diff <- if (is.finite(var_diff) && var_diff >= 0) sqrt(var_diff) else NA_real_
+        se_diff <- if (is.finite(var_diff) && var_diff > 0) sqrt(var_diff) else NA_real_
         beta_diff <- coefs[idx2] - coefs[idx1]
-        z_diff <- beta_diff / se_diff
-        p_diff <- 2 * stats::pnorm(-abs(z_diff))
+        z_diff <- if (is.finite(beta_diff) && is.finite(se_diff)) {
+          beta_diff / se_diff
+        } else {
+          NA_real_
+        }
+        p_diff <- if (is.finite(z_diff)) {
+          2 * stats::pnorm(-abs(z_diff))
+        } else {
+          NA_real_
+        }
         out[["beta_diff"]] <- beta_diff
         out[["se_diff"]] <- se_diff
         out[["z_diff"]] <- z_diff

@@ -14,6 +14,131 @@ test_that("simulation helper returns expected structure", {
   expect_true(all(c("sample", "group") %in% colnames(toy$design)))
 })
 
+test_that("local composition cache counts each neighbor once", {
+  skip_if_not_installed("spatstat.geom")
+
+  X <- spatstat.geom::ppp(
+    x = c(0, 1, 2),
+    y = c(0, 0, 0),
+    window = spatstat.geom::owin(c(-1, 3), c(-1, 1)),
+    marks = factor(c("A", "B", "C"))
+  )
+
+  cache <- panoramic:::.precompute_local_comp_cache(X, radii_um = 3)
+
+  expect_equal(cache$local_total_neighbors[[1]], c(2, 2, 2))
+  expect_equal(cache$local_fraction[[1]][1, ], c(0, 0.5, 0.5))
+})
+
+test_that("global local-composition null is available without changing the default", {
+  expect_equal(
+    panoramic:::.local_comp_score(
+      frac = c(0.50, 0.25),
+      n_neighbors = c(4, 4),
+      overlap_area = c(1, 1),
+      global_prop = 0.25
+    ),
+    c(25, 0)
+  )
+  expect_error(
+    panoramic:::.local_comp_score(
+      frac = 0.5,
+      n_neighbors = 4,
+      overlap_area = 1,
+      global_density = 1,
+      global_prop = 0.25
+    ),
+    "exactly one"
+  )
+  expect_identical(
+    eval(formals(panoramic_spatialstats)$stat),
+    "local_comp_enrichment"
+  )
+
+  skip_if_not_installed("SpatialExperiment")
+  skip_if_not_installed("BiocParallel")
+  toy <- panoramic_simulate_dataset(
+    n_group1 = 1,
+    n_group2 = 1,
+    n_cells_group1 = 60,
+    n_cells_group2 = 60,
+    seed = 11
+  )
+  prep <- panoramic_prepare(
+    spe_list = toy$spe_list,
+    design = toy$design,
+    cell_type = "cell_type",
+    min_cells = 2,
+    window = "rect",
+    BPPARAM = BiocParallel::SerialParam()
+  )
+  se <- panoramic_spatialstats(
+    prep = prep,
+    radii_um = 10,
+    stat = "local_comp_global_enrichment",
+    nsim = 3,
+    BPPARAM = BiocParallel::SerialParam()
+  )
+  expect_true(all(SummarizedExperiment::rowData(se)$stat == "local_comp_global_enrichment"))
+  expect_true(any(is.finite(SummarizedExperiment::assay(se, "yi"))))
+})
+
+test_that("block bootstrap is invariant to point order and has default tiles", {
+  skip_if_not_installed("spatstat.geom")
+
+  window <- spatstat.geom::owin(
+    poly = list(x = c(0, 4, 0), y = c(0, 0, 4))
+  )
+  grid <- expand.grid(
+    x = seq(0.15, 3.75, length.out = 12),
+    y = seq(0.15, 3.75, length.out = 12)
+  )
+  grid <- grid[grid$x + grid$y < 3.95, , drop = FALSE]
+  X <- spatstat.geom::ppp(grid$x, grid$y, window = window)
+
+  run_boot <- function(pattern, nx = 2L, ny = 2L) {
+    result <- NULL
+    invisible(utils::capture.output(
+      result <- panoramic:::.lohboot_block_weighted(
+        pattern,
+        fun = "Kest",
+        correction = "translate",
+        nx = nx,
+        ny = ny,
+        nsim = 10,
+        confidence = 0.8
+      )
+    ))
+    result
+  }
+
+  set.seed(1)
+  original <- run_boot(X)
+  set.seed(2)
+  point_order <- sample.int(spatstat.geom::npoints(X))
+  permuted <- spatstat.geom::ppp(
+    X$x[point_order],
+    X$y[point_order],
+    window = window
+  )
+  set.seed(1)
+  reordered <- run_boot(permuted)
+  expect_equal(original, reordered, tolerance = 1e-12)
+
+  set.seed(1)
+  expect_no_error(
+    panoramic:::.lohboot_quiet(
+      X,
+      "Kest",
+      correction = "translate",
+      global = TRUE,
+      nsim = 10,
+      confidence = 0.8,
+      boot = "block"
+    )
+  )
+})
+
 
 test_that("stepwise workflow runs and exposes spatialstats table", {
   skip_if_not_installed("SpatialExperiment")
@@ -278,6 +403,31 @@ test_that("panoramic_meta_mv rejects ambiguous group labels after sanitization",
       BPPARAM = BiocParallel::SerialParam()
     ),
     "ambiguous after sanitization"
+  )
+})
+
+test_that("panoramic_meta_mv validates identifiers before fitting", {
+  yi <- matrix(c(0.20, 0.15), nrow = 1)
+  vi <- matrix(c(0.04, 0.05), nrow = 1)
+  colnames(yi) <- colnames(vi) <- c("s1", "s2")
+  se <- SummarizedExperiment::SummarizedExperiment(
+    assays = list(yi = yi, vi = vi),
+    colData = S4Vectors::DataFrame(
+      sample = c("s1", "s2"),
+      patient = c("p1", NA_character_),
+      group = c("A", "B")
+    )
+  )
+
+  expect_error(
+    panoramic_meta_mv(
+      se = se,
+      patient_col = "patient",
+      group_col = "group",
+      sample_col = "sample",
+      BPPARAM = BiocParallel::SerialParam()
+    ),
+    "patient_col.*non-missing"
   )
 })
 

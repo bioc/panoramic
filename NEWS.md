@@ -1,3 +1,36 @@
+# panoramic 0.99.4
+
+- Fixed local competition enrichment neighbor counts. `closepairs()` returns
+  both orientations of a pair, and PANORAMIC now retains each pair once before
+  adding it to the neighborhoods of its two endpoints.
+
+- Added `stat = "local_comp_global_enrichment"` as an explicit alternative
+  local-composition statistic. It uses a sample-wide target proportion
+  (a random-label null conditional on observed locations), while the corrected
+  edge-corrected CSR statistic remains the default.
+
+- Fixed block-bootstrap handling: empty tiles no longer contribute artificial
+  zero-valued block means, block-weighted estimates are invariant to point
+  input order, and `boot = "block"` defaults to a 4-by-4 tile grid when tile
+  counts are not supplied.
+
+- Hardened input validation for sample identifiers, preparation parameters,
+  and degenerate convex-hull windows.
+
+- Build-system compatibility:
+  - Switched the vignette to the `knitr::knitr` engine and added
+    `markdown` to `Suggests` so `R CMD build` does not require Pandoc on
+    Bioconductor builders.
+- Documentation updates:
+  - Updated `DESCRIPTION`, `README.md`, `inst/CITATION`, and the tutorial
+    vignette to reflect the published *Bioinformatics* article
+    (`10.1093/bioinformatics/btag546`) and current Bioconductor
+    installation guidance.
+  - Revised the package description to identify edge-corrected local
+    competition enrichment as PANORAMIC's primary spatial statistic.
+  - Removed generated help pages for non-exported implementation details so
+    the installed manual exposes only the supported API.
+
 # panoramic 0.99.3
 
 - Major workflow/API restructuring:

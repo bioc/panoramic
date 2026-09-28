@@ -41,11 +41,15 @@ panoramic(
 
 \item{radii_um}{Numeric vector of radii (microns).}
 
-\item{stat}{Spatial statistic passed to \code{panoramic_spatialstats()}.}
+\item{stat}{Spatial statistic passed to \code{panoramic_spatialstats()}.
+The default \code{"local_comp_enrichment"} uses an edge-corrected CSR null;
+\code{"local_comp_global_enrichment"} is an opt-in random-label alternative
+conditional on observed cell locations.}
 
 \item{nsim}{Integer bootstrap replicates per sample/pair.}
 
-\item{correction}{Optional edge-correction method for spatstat-based statistics. Ignored when \code{stat = "local_comp_enrichment"}.}
+\item{correction}{Optional edge-correction method for spatstat-based statistics.
+Ignored for local-composition statistics.}
 
 \item{min_cells}{Minimum cells per type per sample during preparation.}
 
@@ -73,7 +77,8 @@ panoramic(
 
 \item{tile_size}{Optional tile size for block bootstrap (same units as coordinates).}
 
-\item{nx, ny}{Optional tile counts for block bootstrap (used when \code{boot = "block"}).}
+\item{nx, ny}{Optional tile counts for block bootstrap (used when \code{boot = "block"}).
+When neither is supplied, a 4-by-4 grid is used.}
 
 \item{BPPARAM}{BiocParallel backend.}
 

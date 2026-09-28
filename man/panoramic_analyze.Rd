@@ -43,12 +43,15 @@ panoramic_analyze(
 
 \item{radii_um}{Numeric vector of radii in microns.}
 
-\item{stat}{Character spatial statistic passed to \code{panoramic_spatialstats()}.}
+\item{stat}{Character spatial statistic passed to \code{panoramic_spatialstats()}.
+The default \code{"local_comp_enrichment"} uses an edge-corrected CSR
+null; \code{"local_comp_global_enrichment"} is an opt-in random-label
+alternative conditional on observed cell locations.}
 
 \item{nsim}{Integer bootstrap replicates.}
 
 \item{correction}{Optional edge-correction method for spatstat-based
-statistics. Ignored when \code{stat = "local_comp_enrichment"}.}
+statistics. Ignored for local composition statistics.}
 
 \item{min_cells}{Minimum cells per type per sample.}
 

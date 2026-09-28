@@ -1,10 +1,9 @@
 ---
 title: "PANORAMIC tutorial"
-output: BiocStyle::html_document
 vignette: >
   %\VignetteIndexEntry{PANORAMIC tutorial}
   %\VignetteEncoding{UTF-8}
-  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEngine{knitr::knitr}
 editor_options: 
   markdown: 
     wrap: 72
@@ -19,6 +18,12 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 PANORAMIC is designed for *multi-sample* spatial colocalization
 analysis. It estimates sample-level spatial effects, then pools them
 with multilevel meta-analysis to test group-level differences.
+
+The published PANORAMIC paper describes the default workflow as
+edge-corrected neighborhood enrichment combined with spatial bootstrap
+uncertainty estimation and multilevel random-effects meta-analysis
+(Chang et al., *Bioinformatics* 42(8): btag546,
+https://doi.org/10.1093/bioinformatics/btag546).
 
 Compared with single-sample analyses, PANORAMIC gives you:
 
@@ -125,8 +130,17 @@ names(S4Vectors::metadata(prep[[1]])$panoramic)
 
 # Step 2: Compute Sample-Level Spatial Effects
 
-Default PANORAMIC statistic is `stat = "local_comp_enrichment"`
-(percentage-point enrichment vs local null expectation).
+The default PANORAMIC statistic is `stat = "local_comp_enrichment"`,
+which reports edge-corrected neighborhood enrichment on a percentage-point
+scale relative to a sample-specific null expectation.
+
+For tissue with strong large-scale density variation, an alternative is
+`stat = "local_comp_global_enrichment"`. It compares local composition with
+the sample-wide target proportion, corresponding to a random-label null that
+conditions on the observed cell locations. This can be useful when the
+scientific question is label mixing within an observed tissue architecture;
+it should not be interpreted as correcting for spatially varying abundance or
+as evidence of a direct cell-cell interaction.
 
 ```{r spatial_stats, message=FALSE, warning=FALSE}
 radii_um <- c(25)
@@ -242,7 +256,7 @@ plot_spatial_network(
 # Practical Notes
 
 -   Start with `local_comp_enrichment` unless you have a specific reason
-    to use L/K-function alternatives.
+    to use the global-composition or L/K-function alternatives.
 -   Use at least two biological samples per group for stable contrasts.
 -   Increase `nsim` for final analyses (the vignette uses modest values
     for speed).
@@ -263,6 +277,15 @@ For complementary spatial analysis workflows, see:
     spatial workflows.
 -   `r BiocStyle::Biocpkg("spicyR")` for differential spatial
     localization testing in imaging data.
+
+For methodological details and biological applications in colorectal
+cancer and head and neck squamous cell carcinoma tissue microarrays, see
+the published PANORAMIC paper:
+
+-   Chang J, Espin Perez A, Molina P, Khurana R, Zhang W, Tian L,
+    Plevritis SK. Multi-sample and multi-group spatial colocalization
+    analysis using PANORAMIC. *Bioinformatics*. 2026;42(8):btag546.
+    https://doi.org/10.1093/bioinformatics/btag546
 
 ```{r session_info}
 sessionInfo()

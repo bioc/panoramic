@@ -22,11 +22,17 @@ panoramic_meta_mv(
 \arguments{
 \item{se}{A \code{SummarizedExperiment} with assays \code{yi} and \code{vi}.}
 
-\item{patient_col}{Column in \code{colData(se)} identifying patients.}
+\item{patient_col}{Non-missing, non-empty column in \code{colData(se)}
+identifying patients.}
 
-\item{group_col}{Optional grouping column. When provided, pooled means are estimated with \code{mods = ~ 0 + group}. For two groups, contrast is \code{beta_diff = group2 - group1}; group order is factor levels (if factor) or lexicographic order of labels.}
+\item{group_col}{Optional non-missing, non-empty grouping column. When
+provided, pooled means are estimated with \code{mods = ~ 0 + group}. For two
+groups, contrast is \code{beta_diff = group2 - group1}; group order is factor
+levels (if factor) or lexicographic order of labels.}
 
-\item{sample_col}{Optional sample-id column; if \code{NULL}, \code{colnames(se)} are used.}
+\item{sample_col}{Optional non-missing, non-empty sample-id column that
+uniquely identifies each assay column; if \code{NULL}, \code{colnames(se)}
+are used.}
 
 \item{tau_structure}{Random-effects structure: \code{"patient"} or \code{"patient_sample"}.}
 

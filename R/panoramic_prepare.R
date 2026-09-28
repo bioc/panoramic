@@ -5,6 +5,7 @@
 #' @param coords Numeric matrix of coordinates (columns: x, y).
 #' @return Reordered numeric matrix of coordinates
 #' @keywords internal
+#' @noRd
 .reorder_ccw <- function(coords) {
   if (!is.matrix(coords)) coords <- as.matrix(coords)
   cxy <- colMeans(coords)
@@ -70,6 +71,15 @@ panoramic_prepare <- function(
     BPPARAM = BiocParallel::SerialParam()
 ) {
   window <- match.arg(window)
+  if (!is.character(cell_type) || length(cell_type) != 1L ||
+      is.na(cell_type) || !nzchar(cell_type)) {
+    stop("`cell_type` must be a non-missing column name.", call. = FALSE)
+  }
+  if (identical(window, "concave") &&
+      (!is.numeric(concavity) || length(concavity) != 1L ||
+       is.na(concavity) || concavity <= 0)) {
+    stop("`concavity` must be a positive numeric scalar.", call. = FALSE)
+  }
   if (!is.list(spe_list) || length(spe_list) < 1L) {
     stop("`spe_list` must be a non-empty list of SpatialExperiment objects.")
   }
@@ -105,6 +115,15 @@ panoramic_prepare <- function(
   if (anyNA(names(spe_list)) || any(!nzchar(names(spe_list)))) {
     stop("`spe_list` names must be non-missing and non-empty.")
   }
+  if (anyDuplicated(names(spe_list))) {
+    duplicated_ids <- unique(names(spe_list)[duplicated(names(spe_list))])
+    stop(
+      "`spe_list` contains duplicated sample names: ",
+      paste(duplicated_ids, collapse = ", "),
+      ".",
+      call. = FALSE
+    )
+  }
   if (!all(names(spe_list) %in% design$sample))
     stop("All list names must appear in design$sample")
   missing_cell_type <- names(spe_list)[!vapply(spe_list, function(spe) {
@@ -117,16 +136,21 @@ panoramic_prepare <- function(
       "."
     )
   }
-  min_cells <- as.integer(min_cells)
-  if (!is.finite(min_cells) || length(min_cells) != 1L || min_cells < 1L) {
+  if (!is.numeric(min_cells) || length(min_cells) != 1L ||
+      !is.finite(min_cells) || min_cells < 1L ||
+      min_cells != as.integer(min_cells)) {
     stop("`min_cells` must be a positive integer.")
   }
+  min_cells <- as.integer(min_cells)
   
   # Harmonize cell-type levels across samples
   all_ct <- unique(unlist(lapply(spe_list, function(spe) {
     as.character(SummarizedExperiment::colData(spe)[[cell_type]])
   })))
-  all_ct <- sort(all_ct)
+  all_ct <- sort(unique(all_ct[!is.na(all_ct) & nzchar(all_ct)]))
+  if (length(all_ct) == 0L) {
+    stop("No non-missing cell-type labels were found.", call. = FALSE)
+  }
   
   # Per-sample prep function
   .prep_one <- function(sid) {
@@ -216,8 +240,28 @@ panoramic_prepare <- function(
                       make_rect_window()
                     } else {
                       ch <- grDevices::chull(coords[, 1], coords[, 2])
-                      hull <- .reorder_ccw(coords[ch, , drop = FALSE])
-                      spatstat.geom::owin(poly = list(x = hull[, 1], y = hull[, 2]))
+                      if (length(ch) < 3L) {
+                        warning(
+                          "Sample `", sid, "` has collinear coordinates after filtering; using rectangular window instead of convex hull.",
+                          call. = FALSE
+                        )
+                        make_rect_window()
+                      } else {
+                        hull <- .reorder_ccw(coords[ch, , drop = FALSE])
+                        polygon_window <- try(
+                          spatstat.geom::owin(poly = list(x = hull[, 1], y = hull[, 2])),
+                          silent = TRUE
+                        )
+                        if (inherits(polygon_window, "try-error")) {
+                          warning(
+                            "Convex hull window failed for sample `", sid, "`; using rectangular window.",
+                            call. = FALSE
+                          )
+                          make_rect_window()
+                        } else {
+                          polygon_window
+                        }
+                      }
                     }
                   },
                   rect = {
@@ -242,16 +286,5 @@ panoramic_prepare <- function(
   out
 }
 
-#' Pipe-compatible null operator
-#' 
-#' Returns b if a is NULL, otherwise a. 
-#'
-#' @name null_coalesce
-#' @aliases %||%
-#' 
-#' @param a, b Objects to test; if a is NULL b is returned. 
-#' 
-#' @return The non-NULL object. 
-#' 
-#' @keywords internal
+# Internal null-coalescing helper.
 `%||%` <- function(a,b) if (is.null(a)) b else a

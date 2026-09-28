@@ -1,6 +1,9 @@
 #' Internal: add directional colocalization labels
 #'
+#' @return A data frame with `coloc_source`, `coloc_target`, and
+#'   `coloc_direction` columns added when the required cell-type columns exist.
 #' @keywords internal
+#' @noRd
 .panoramic_add_coloc_direction <- function(df) {
   if (!is.data.frame(df)) return(df)
   if (!all(c("ct1", "ct2") %in% colnames(df))) return(df)
@@ -18,7 +21,10 @@
 
 #' Internal: flatten spatialstats assays to a long table
 #'
+#' @return A data frame containing feature identifiers and the `yi` and `vi`
+#'   spatial-statistic assays.
 #' @keywords internal
+#' @noRd
 .panoramic_extract_spatialstats_table <- function(se, drop_na = FALSE) {
   if (!inherits(se, "SummarizedExperiment")) {
     stop("`se` must be a SummarizedExperiment.", call. = FALSE)
@@ -65,7 +71,10 @@
 
 #' Internal: extract feature-level meta-analysis table from rowData
 #'
+#' @return A data frame containing feature identifiers and meta-analysis
+#'   statistics stored in `rowData(se)`.
 #' @keywords internal
+#' @noRd
 .panoramic_extract_meta_table <- function(
     se,
     feature_cols = c("ct1", "ct2", "radius_um", "stat"),

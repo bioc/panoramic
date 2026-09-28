@@ -5,6 +5,7 @@
 #'
 #' @return Character vector aligned to names(spe_list), one value per sample.
 #' @keywords internal
+#' @noRd
 .panoramic_one_value_per_sample <- function(spe_list, field) {
   vals <- vapply(names(spe_list), function(sid) {
     spe <- spe_list[[sid]]
@@ -37,6 +38,7 @@
 #'
 #' @return \code{se_stats} with additional columns in \code{colData(se_stats)}.
 #' @keywords internal
+#' @noRd
 .panoramic_attach_sample_metadata <- function(se_stats, spe_list, fields) {
   stopifnot("sample" %in% colnames(SummarizedExperiment::colData(se_stats)))
   if (length(fields) == 0L) return(se_stats)
@@ -78,9 +80,12 @@
 #' @param pairs Either \code{"auto"} or a data.frame with columns \code{ct1}, \code{ct2}.
 #' @param radii_um Numeric vector of radii in microns.
 #' @param stat Character spatial statistic passed to \code{panoramic_spatialstats()}.
+#'  The default \code{"local_comp_enrichment"} uses an edge-corrected CSR
+#'  null; \code{"local_comp_global_enrichment"} is an opt-in random-label
+#'  alternative conditional on observed cell locations.
 #' @param nsim Integer bootstrap replicates.
 #' @param correction Optional edge-correction method for spatstat-based
-#'  statistics. Ignored when \code{stat = "local_comp_enrichment"}.
+#'  statistics. Ignored for local composition statistics.
 #' @param min_cells Minimum cells per type per sample.
 #' @param concavity Concavity for concave hull windows.
 #' @param window One of \code{"concave"}, \code{"convex"}, or \code{"rect"}.
@@ -176,13 +181,13 @@ panoramic_analyze <- function(
     patient_col <- if ("patient" %in% colnames(design)) "patient" else sample_col
   }
 
-  if (identical(stat, "local_comp_enrichment")) {
+  if (stat %in% c("local_comp_enrichment", "local_comp_global_enrichment")) {
     if (!is.null(correction) &&
         !(length(correction) == 1L &&
           is.character(correction) &&
           identical(correction, "translate"))) {
       warning(
-        "`correction` is ignored when `stat = \"local_comp_enrichment\"`.",
+        "`correction` is ignored for local composition statistics.",
         call. = FALSE
       )
     }

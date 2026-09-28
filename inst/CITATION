@@ -12,9 +12,11 @@ bibentry(
     person(given = "Lu", family = "Tian"),
     person(given = "Sylvia", family = "Plevritis")
   ),
-  year = "2025",
-  journal = "bioRxiv",
-  note = "Preprint",
-  url = "https://www.biorxiv.org/content/10.1101/2025.09.18.677135v2",
-  doi = "10.1101/2025.09.18.677135"
+  year = "2026",
+  journal = "Bioinformatics",
+  volume = "42",
+  number = "8",
+  pages = "btag546",
+  url = "https://doi.org/10.1093/bioinformatics/btag546",
+  doi = "10.1093/bioinformatics/btag546"
 )

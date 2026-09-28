@@ -11,6 +11,7 @@
 #' @return A data.frame with columns \code{ct1} and \code{ct2}. 
 #' 
 #' @keywords internal
+#' @noRd
 .panoramic_pairs <- function(prep_list,
                              include_self = TRUE, min_presence = 0.0) {
   
@@ -63,6 +64,7 @@
 #'
 #' @return A named list describing the global/local function mapping and
 #'  options for the requested key, or \code{NULL} if unsupported.
+#' @noRd
 .spatstat_local_function_info <- function(key) {
   TheTable <- list(
     pcf          = list(Global = spatstat.explore::pcf,
@@ -133,6 +135,7 @@
 #'  structures used by local composition bootstrap routines.
 #'
 #' @keywords internal
+#' @noRd
 .precompute_local_comp_cache <- function(X, radii_um) {
   if (!spatstat.geom::is.ppp(X)) {
     stop("`X` must be a spatstat ppp object.", call. = FALSE)
@@ -181,7 +184,8 @@
     # Heuristic guardrail: avoid pathological close-pair enumeration that can
     # stall or overflow at very high densities.
     p_in_radius <- min(1, pi * max_r^2 / area_w)
-    est_pairs <- (n * (n - 1) / 2) * p_in_radius
+    # closepairs() returns both orientations of every pair.
+    est_pairs <- n * (n - 1) * p_in_radius
     if (is.finite(max_expected_pairs) &&
         max_expected_pairs > 0 &&
         is.finite(est_pairs) &&
@@ -206,10 +210,14 @@
         silent = TRUE
       )
       if (!inherits(cp, "try-error") && length(cp$i) > 0L) {
-        ord <- order(cp$d)
-        edge_i <- cp$i[ord]
-        edge_j <- cp$j[ord]
-        edge_d <- cp$d[ord]
+        # Keep each undirected pair once, then add it to both endpoints below.
+        keep <- cp$i < cp$j
+        if (any(keep)) {
+          ord <- order(cp$d[keep])
+          edge_i <- cp$i[keep][ord]
+          edge_j <- cp$j[keep][ord]
+          edge_d <- cp$d[keep][ord]
+        }
       } else if (inherits(cp, "try-error")) {
         warning(
           "local_comp_enrichment cache closepairs failed; returning NA local-composition estimates for this sample.",
@@ -279,13 +287,25 @@
 #'  difference between observed and expected local composition).
 #'
 #' @keywords internal
+#' @noRd
 .local_comp_score <- function(
     frac,
     n_neighbors,
     overlap_area,
-    global_density
+    global_density = NULL,
+    global_prop = NULL
 ) {
-  if (!is.finite(global_density) || global_density < 0) {
+  if (identical(is.null(global_density), is.null(global_prop))) {
+    stop("Provide exactly one of `global_density` or `global_prop`.", call. = FALSE)
+  }
+  if (!is.null(global_density) &&
+      (!is.numeric(global_density) || length(global_density) != 1L ||
+       !is.finite(global_density) || global_density < 0)) {
+    return(rep(NA_real_, length(frac)))
+  }
+  if (!is.null(global_prop) &&
+      (!is.numeric(global_prop) || length(global_prop) != 1L ||
+       !is.finite(global_prop) || global_prop < 0 || global_prop > 1)) {
     return(rep(NA_real_, length(frac)))
   }
   out <- rep(NA_real_, length(frac))
@@ -293,8 +313,12 @@
     is.finite(overlap_area) & overlap_area >= 0
   if (!any(ok)) return(out)
   obs_prop <- pmax(pmin(frac[ok], 1), 0)
-  expected_count <- global_density * overlap_area[ok]
-  expected_prop <- expected_count / n_neighbors[ok]
+  expected_prop <- if (is.null(global_prop)) {
+    expected_count <- global_density * overlap_area[ok]
+    expected_count / n_neighbors[ok]
+  } else {
+    rep(global_prop, sum(ok))
+  }
   expected_prop <- pmax(pmin(expected_prop, 1), 0)
   out[ok] <- 100 * (obs_prop - expected_prop)
   out
@@ -310,11 +334,14 @@
 #' @param type Quantile type for bootstrap intervals.
 #' @param boot One of \code{"approx"} or \code{"block"}.
 #' @param nx,ny Integer block counts (used only for \code{boot = "block"}).
+#' @param null_model Either \code{"csr"} for the edge-corrected count null or
+#'  \code{"global"} for the global-composition (random-label) null.
 #' @param local_cache Optional cache from \code{.precompute_local_comp_cache()}.
 #'
 #' @return A data.frame compatible with \code{.summarize_lohboot()}.
 #'
 #' @keywords internal
+#' @noRd
 .lohboot_local_comp <- function(
     X,
     from,
@@ -326,12 +353,14 @@
     boot = c("approx", "block"),
     nx = 4,
     ny = nx,
+    null_model = c("csr", "global"),
     local_cache = NULL
 ) {
   # PANORAMIC-specific extension (not provided by spatstat::lohboot):
   # bootstrap for local composition enrichment using cached neighborhood
   # geometry and optional overlap-weighted block resampling.
   boot <- match.arg(boot)
+  null_model <- match.arg(null_model)
   if (!spatstat.geom::is.ppp(X)) {
     stop("`X` must be a spatstat ppp object.", call. = FALSE)
   }
@@ -375,23 +404,37 @@
 
   n_anchor <- length(anchor_idx)
   global_density <- local_cache$global_density[to_idx]
-  if (identical(from, to) &&
-      is.finite(local_cache$area_window) &&
-      local_cache$area_window > 0) {
+  global_prop <- local_cache$global_prop[to_idx]
+  n_points <- length(local_cache$x)
+  if (identical(from, to)) {
     n_to <- length(local_cache$indices_by_type[[to]])
-    global_density <- max((n_to - 1) / local_cache$area_window, 0)
+    if (is.finite(local_cache$area_window) && local_cache$area_window > 0) {
+      global_density <- max((n_to - 1) / local_cache$area_window, 0)
+    }
+    if (n_points > 1L) {
+      global_prop <- max((n_to - 1) / (n_points - 1), 0)
+    }
   }
   y <- matrix(NA_real_, nrow = nr, ncol = n_anchor)
   for (k in seq_len(nr)) {
     frac <- local_cache$local_fraction[[radii_match[k]]][anchor_idx, to_idx]
     n_neighbors <- local_cache$local_total_neighbors[[radii_match[k]]][anchor_idx]
     overlap_area <- local_cache$local_overlap_area[anchor_idx, radii_match[k]]
-    y[k, ] <- .local_comp_score(
-      frac = frac,
-      n_neighbors = n_neighbors,
-      overlap_area = overlap_area,
-      global_density = global_density
-    )
+    y[k, ] <- if (identical(null_model, "csr")) {
+      .local_comp_score(
+        frac = frac,
+        n_neighbors = n_neighbors,
+        overlap_area = overlap_area,
+        global_density = global_density
+      )
+    } else {
+      .local_comp_score(
+        frac = frac,
+        n_neighbors = n_neighbors,
+        overlap_area = overlap_area,
+        global_prop = global_prop
+      )
+    }
   }
 
   if (!any(is.finite(y))) {
@@ -435,12 +478,13 @@
       spatstat.geom::area.owin(iw)
     }, numeric(1))
 
+    block_counts <- tabulate(BlockIndex, nbins = length(blocks))
     keep_blocks <- is.finite(overlap_area) & is.finite(tile_area) &
-      overlap_area > 0 & tile_area > 0
+      overlap_area > 0 & tile_area > 0 & block_counts > 0
     if (sum(keep_blocks) < 2L) {
       warning(
         sprintf(
-          "local_comp_enrichment block bootstrap: <2 usable tiles for pair '%s' -> '%s'; returning NA variance/bands.",
+          "local_comp_enrichment block bootstrap: <2 occupied tiles for pair '%s' -> '%s'; returning NA variance/bands.",
           from, to
         ),
         call. = FALSE
@@ -470,10 +514,6 @@
         ymean[is.nan(ymean)] <- NA_real_
       } else {
         ymarks <- by(t(y), BlockFactor, colSums, na.rm = TRUE, simplify = FALSE)
-        bad <- vapply(ymarks, function(z) is.null(z) || length(z) != nr, logical(1))
-        if (any(bad)) {
-          ymarks[bad] <- rep(list(numeric(nr)), sum(bad))
-        }
         ymarks <- as.matrix(do.call(cbind, ymarks))
         block_counts_kept <- tabulate(BlockIndex, nbins = nmarks)
         yblock_mean <- sweep(ymarks, 2, pmax(block_counts_kept, 1), FUN = "/")
@@ -547,6 +587,7 @@
 #'
 #' @return A data.frame with columns including \code{r}, theoretical curve,
 #'  estimate, and lower/upper interval bounds.
+#' @noRd
 .lohboot_block_weighted <- function(
     X, fun = c("pcf", "Kest", "Lest", "pcfinhom", "Kinhom", "Linhom",
                "Kcross", "Lcross", "Kdot", "Ldot",
@@ -597,17 +638,14 @@
   f <- localfun(X, ...)
   theo <- f$theo
   correction <- attr(f, "correction")
-  switch(correction,
-         none = { ckey <- clab <- "un"; cadj <- "uncorrected" },
-         border = { ckey <- "border"; clab <- "bord"; cadj <- "border-corrected" },
-         translate = { ckey <- clab <- "trans"; cadj <- "translation-corrected" },
-         isotropic = { ckey <- clab <- "iso"; cadj <- "Ripley isotropic corrected" })
-
-  types <- levels(spatstat.geom::marks(X))
-  from <- spatstat.utils::resolve.1.default(list(from = types[1]), list(...))
-  to <- spatstat.utils::resolve.1.default(list(to = types[2]), list(...))
-  fromName <- spatstat.utils::make.parseable(paste(from))
-  toName <- spatstat.utils::make.parseable(paste(to))
+  ckey <- switch(
+    correction,
+    none = "un",
+    border = "border",
+    translate = "trans",
+    isotropic = "iso",
+    stop("Unsupported spatstat edge correction.", call. = FALSE)
+  )
   if (info$indices > 0) {
     X <- attr(f, "Xfrom")
   }
@@ -642,9 +680,10 @@
   y <- y[, keep_pts, drop = FALSE]
   n <- sum(keep_pts)
   BlockIndex <- BlockIndex[keep_pts]
-  BlockFactor <- factor(BlockIndex, levels = unique(BlockIndex))
+  nmarks <- sum(keep_blocks)
+  # Keep block means aligned with the ordered overlap weights.
+  BlockFactor <- factor(BlockIndex, levels = seq_len(nmarks))
 
-  nmarks <- length(levels(BlockFactor))
   weights <- overlap_area[keep_blocks] / tile_area[keep_blocks]
   weights <- weights[seq_len(nmarks)]
   if (any(!is.finite(weights)) || sum(weights) <= 0) {
@@ -734,6 +773,7 @@
 #'  or a compatible data.frame for \code{boot = "block"}.
 #' 
 #' @keywords internal
+#' @noRd
 .lohboot_quiet <- function(X, fun, ..., verbose = FALSE,
                            boot = c("approx", "block"),
                            tile_size = NULL, nx = NULL, ny = NULL) {
@@ -769,6 +809,19 @@
       }
       nx <- max(1L, as.integer(ceiling(width / tile_size)))
       ny <- max(1L, as.integer(ceiling(height / tile_size)))
+    } else {
+      if (is.null(nx)) nx <- 4L
+      if (is.null(ny)) ny <- nx
+      validate_tile_count <- function(x, name) {
+        if (!is.numeric(x) || length(x) != 1L || !is.finite(x) ||
+            x < 1 || x != as.integer(x)) {
+          stop(sprintf("`%s` must be a positive integer for block bootstrap.", name),
+               call. = FALSE)
+        }
+        as.integer(x)
+      }
+      nx <- validate_tile_count(nx, "nx")
+      ny <- validate_tile_count(ny, "ny")
     }
     args <- list(X = X, fun = fun, ..., nx = nx, ny = ny)
   }
@@ -808,13 +861,12 @@
 #' @return Numeric vector of interpolated values, length \code{length(xout)}. 
 #' 
 #' @keywords internal
+#' @noRd
 .safe_approx <- function(x, y, xout) {
   ok <- is.finite(x) & is.finite(y)
   n  <- sum(ok)
   if (n >= 2L) {
     stats::approx(x[ok], y[ok], xout = xout, rule = 1, ties = "ordered")$y
-    # stats::approx(x[ok], y[ok], xout = xout, rule = 2, ties = "ordered")$y
-    
   } else if (n == 1L) {
     rep(y[ok][1], length(xout))
   } else {
@@ -836,6 +888,7 @@
 #' @return A data.frame with numeric columns \code{r}, \code{yi}, and \code{vi}, or \code{NULL} if the object cannot be parsed. 
 #' 
 #' @keywords internal
+#' @noRd
 .summarize_lohboot <- function(loh_obj, center_L = TRUE, conf = 0.95) {
   df <- try(as.data.frame(loh_obj), silent = TRUE)
   if (inherits(df, "try-error") || NROW(df) == 0L) return(NULL)
@@ -909,8 +962,10 @@
 #' @param meta The \code{metadata$panoramic} list for one sample, containing at least a spatstat \code{ppp} object and a \code{marks_tab} table. 
 #' @param ct1,ct2 Character. Cell-type labels. 
 #' @param stat Character. Summary statistic. Default is
-#'  \code{"local_comp_enrichment"}. Other options are \code{"Lcross"},
-#'  \code{"Kcross"}, \code{"Lest"}, and \code{"Kest"}.
+#'  \code{"local_comp_enrichment"}. \code{"local_comp_global_enrichment"}
+#'  compares local target composition with the sample-wide target proportion.
+#'  Other options are \code{"Lcross"}, \code{"Kcross"}, \code{"Lest"}, and
+#'  \code{"Kest"}.
 #' @param nsim Integer. Number of Loh bootstrap simulations. 
 #' @param correction Character. Edge correction passed to spatstat.
 #' @param radii_um Numeric vector of radii (microns) on which to summarize.
@@ -922,11 +977,12 @@
 #'  when \code{boot = "block"}.
 #' @param local_comp_cache Optional cache object from
 #'  \code{.precompute_local_comp_cache()} to avoid repeated neighbor searches
-#'  when \code{stat = "local_comp_enrichment"}.
+#'  when using a local composition statistic.
 #' 
 #' @return A data.frame with columns \code{radius_um}, \code{yi}, and \code{vi}, filled with \code{NA} if insufficient cells of either type are present. 
 #' 
 #' @keywords internal
+#' @noRd
 .one_pair_one_sample <- function(meta, ct1, ct2, stat = "local_comp_enrichment",
                                  nsim = 100, correction = "translate",
                                  radii_um, verbose = FALSE,
@@ -936,17 +992,26 @@
   boot <- match.arg(boot)
   is_L <- grepl("^L", stat)
   stat_use <- if (is_L) sub("^L", "K", stat) else stat
+  is_local_comp <- stat_use %in% c(
+    "local_comp_enrichment",
+    "local_comp_global_enrichment"
+  )
 
   tab <- meta$marks_tab
   n1 <- unname(tab[ct1]); n2 <- unname(tab[ct2])
-  min_to <- if (identical(stat_use, "local_comp_enrichment")) 1L else 2L
+  min_to <- if (is_local_comp) 1L else 2L
   if (is.na(n1) || n1 < 2L || is.na(n2) || n2 < min_to) {
     return(data.frame(radius_um = radii_um, yi = NA_real_, vi = NA_real_))
   }
   
   X <- meta$ppp
   
-  if (identical(stat_use, "local_comp_enrichment")) {
+  if (is_local_comp) {
+    null_model <- if (identical(stat_use, "local_comp_global_enrichment")) {
+      "global"
+    } else {
+      "csr"
+    }
     loh <- .lohboot_quiet(
       X,
       "local_comp_enrichment",
@@ -959,6 +1024,7 @@
       tile_size = tile_size,
       nx = nx,
       ny = ny,
+      null_model = null_model,
       local_cache = local_comp_cache
     )
   } else if (!identical(ct1, ct2) && identical(stat_use, "Kcross")) {
@@ -977,7 +1043,7 @@
     )
   }
   
-  center_curve <- !is_L && !identical(stat_use, "local_comp_enrichment")
+  center_curve <- !is_L && !is_local_comp
   df <- try(.summarize_lohboot(loh, center_L = center_curve), silent = TRUE)
   if (inherits(df, "try-error") || is.null(df) || sum(is.finite(df$r)) < 1L) {
     return(data.frame(radius_um = radii_um, yi = NA_real_, vi = NA_real_))
@@ -1017,8 +1083,10 @@
 #'  or a data.frame with columns \code{ct1}, \code{ct2}. 
 #' @param radii_um Numeric vector of radii (microns) at which to evaluate the colocalization statistic. 
 #' @param stat Character. Summary statistic. Default is
-#'  \code{"local_comp_enrichment"}. Other supported values are
-#'  \code{"Lcross"}, \code{"Lest"}, \code{"Kcross"}, and \code{"Kest"}.
+#'  \code{"local_comp_enrichment"}. \code{"local_comp_global_enrichment"}
+#'  compares local target composition with the sample-wide target proportion.
+#'  Other supported values are \code{"Lcross"}, \code{"Lest"},
+#'  \code{"Kcross"}, and \code{"Kest"}.
 #' @param nsim Integer. Number of Loh bootstrap simulations per sample/pair. 
 #' @param boot Character. Bootstrap mode: \code{"approx"} (no tiling) or
 #'  \code{"block"} (tiled Loh bootstrap).
@@ -1026,7 +1094,7 @@
 #'  as spatial coordinates. Used only when \code{boot = "block"}.
 #' @param nx,ny Optional integers giving the number of tiles in x/y directions
 #'  when \code{boot = "block"}.
-#' @param correction Chatacter. Edge correction method for spatstat ("translate", "border", ...). 
+#' @param correction Character. Edge correction method for spatstat ("translate", "border", ...).
 #' @param seed Integer random seed for reproducible bootstrap simulations.
 #' @param BPPARAM A BiocParallelParam object controlling parallelisation across samples.
 #' @param verbose Logical. If \code{TRUE}, show output from bootstrap calls.
@@ -1044,13 +1112,17 @@
 #' When \code{stat} is an L-function, variance is computed via the delta method
 #' from the corresponding K-function estimates and then centered by \code{r}.
 #' For \code{stat = "local_comp_enrichment"}, enrichment is computed for each
-#' anchor cell as observed minus expected local target proportion within radius
-#' \code{r}. The expected proportion is edge-corrected by first computing the
-#' expected target count in the overlap area \eqn{|B_r(ct1) \cap W|} and then
-#' dividing by the observed local neighbor count:
+#' anchor cell as observed minus the edge-corrected expected local target
+#' proportion within radius \code{r}. The expected proportion is computed from
+#' the expected target count in the overlap area \eqn{|B_r(ct1) \cap W|} and
+#' the observed local neighbor count:
 #' \deqn{100\cdot\left(\hat{p}_{obs}(ct2 \mid ct1, r) - \hat{p}_{exp}^{edge}(ct2 \mid ct1, r)\right)}
 #' where \eqn{\hat{p}_{exp}^{edge} = (\lambda_{ct2}\cdot|B_r(ct1)\cap W|)/N_{obs,\cdot}(ct1,r)}.
-#' The null expectation is 0 and units are percentage points.
+#' \code{stat = "local_comp_global_enrichment"} instead uses the sample-wide
+#' target proportion as \eqn{\hat{p}_{exp}}, corresponding to a random-label
+#' null conditional on the observed cell locations. Both statistics are in
+#' percentage points. For self-pairs, the anchor is excluded from the expected
+#' target density or proportion.
 #' Local neighbor composition and overlap areas are precomputed per
 #' sample/radius to avoid repeated geometry/neighborhood calculations across
 #' cell-type pairs.
@@ -1115,7 +1187,11 @@ panoramic_spatialstats <- function(
   if (stat %in% c("local_composition_enrichment", "local_comp")) {
     stat <- "local_comp_enrichment"
   }
-  valid_stats <- c("local_comp_enrichment", "Lcross", "Kcross", "Lest", "Kest")
+  local_comp_stats <- c(
+    "local_comp_enrichment",
+    "local_comp_global_enrichment"
+  )
+  valid_stats <- c(local_comp_stats, "Lcross", "Kcross", "Lest", "Kest")
   if (!stat %in% valid_stats) {
     stop(
       "`stat` must be one of: ",
@@ -1143,7 +1219,7 @@ panoramic_spatialstats <- function(
     meta <- S4Vectors::metadata(prep[[sid]])$panoramic
     local_comp_cache <- NULL
     local_comp_cache_error <- NULL
-    if (identical(stat, "local_comp_enrichment")) {
+    if (stat %in% local_comp_stats) {
       cache_obj <- tryCatch(
         .precompute_local_comp_cache(meta$ppp, radii_um),
         error = function(e) e
