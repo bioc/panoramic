@@ -1,6 +1,6 @@
 Package: panoramic
 Title: Variance-Aware Multi-Sample Spatial Colocalization Analysis
-Version: 1.0.0
+Version: 1.1.0
 Authors@R: person("Jacob", "Chang", email = "jachang4@stanford.edu", role = c("aut", "cre", "fnd"), comment = c(ORCID = "0000-0002-3719-7949"))
 Description: Quantifies and compares cell-type spatial colocalization
     across samples, patients, and conditions in spatial omics studies.
